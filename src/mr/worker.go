@@ -185,8 +185,9 @@ func (w *worker) register() {
 	args := &RegisterArgs{}
 	reply := &RegisterReply{}
 	if ok := call("Master.RegWorker", args, reply); !ok {
-		w.id = reply.WorkerId
+		log.Fatal("ref fail")
 	}
+	w.id = reply.WorkerId
 }
 
 //

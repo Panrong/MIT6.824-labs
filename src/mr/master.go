@@ -4,11 +4,11 @@ import (
 	"log"
 	"sync"
 	"time"
+	"net"
+	"net/rpc"
+	"net/http"
+	"os"
 )
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
 
 const (
 	TaskStatusReady = 0
@@ -92,7 +92,7 @@ func (m *Master) schedule() {
 	}
 	if allFinish {
 		if m.taskPhase == MapPhase {
-			m.initMapTask()
+			m.initReduceTask()
 		} else {
 			m.done = true
 		}
@@ -166,7 +166,7 @@ func (m *Master) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) error 
 	return nil
 }
 
-func (m *Master) RegWorker(arg *RegisterArgs, reply *RegisterReply) error {
+func (m *Master) RegWorker(args *RegisterArgs, reply *RegisterReply) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.workerSeq += 1
