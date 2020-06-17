@@ -88,7 +88,7 @@ func (w *worker) doTask(t Task) {
 	case ReducePhase:
 		w.doReduceTask(t)
 	default:
-		panic(fmt.Sprint("task phase err: %v", t.Phase))
+		panic(fmt.Sprintf("task phase err: %v", t.Phase))
 
 	}
 }
@@ -155,8 +155,7 @@ func (w *worker) doReduceTask(t Task) {
 
 	res := make([]string, 0, 100)
 	for k, v := range maps {
-		res = append(res, fmt.Sprintf("%v %v\n",
-			k, w.reducef(k, v)))
+		res = append(res, fmt.Sprintf("%v %v\n", k, w.reducef(k, v)))
 
 		if err := ioutil.WriteFile(mergeName(t.Seq), []byte(strings.Join(res, "")), 0600); err != nil {
 			w.reportTask(t, false, err)
@@ -185,7 +184,7 @@ func (w *worker) register() {
 	args := &RegisterArgs{}
 	reply := &RegisterReply{}
 	if ok := call("Master.RegWorker", args, reply); !ok {
-		log.Fatal("ref fail")
+		log.Fatal("reg fail")
 	}
 	w.id = reply.WorkerId
 }
