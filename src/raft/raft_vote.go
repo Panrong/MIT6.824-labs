@@ -211,7 +211,7 @@ func (rf *Raft) startElection() {
 
 	for {
 		// count votes
-		r := <- votesCh
+		r := <-votesCh
 		chResCount += 1
 		if r == true {
 			grantedCount += 1
@@ -219,25 +219,24 @@ func (rf *Raft) startElection() {
 		if chResCount == len(rf.peers) || grantedCount > len(rf.peers)/2 || chResCount-grantedCount > len(rf.peers)/2 {
 			break
 		}
-
-		// win not enough votes
-		if grantedCount <= len(rf.peers)/2 {
-			rf.log("grantedCount <= len/2:count:%d", grantedCount)
-			return
-		}
-
-		// win enough votes
-		rf.lock("start election win")
-		rf.log("before try change to leader,count:%d, args:%+v", grantedCount, args)
-		if rf.term == args.Term && rf.role == Candidate {
-			rf.changeRole(Leader)
-			rf.persist()
-		}
-		if rf.role == Leader {
-			rf.resetHeartBeatTimers()
-		}
-		rf.unlock("start election win")
-
 	}
+
+	// win not enough votes
+	if grantedCount <= len(rf.peers)/2 {
+		rf.log("grantedCount <= len/2:count:%d", grantedCount)
+		return
+	}
+
+	// win enough votes
+	rf.lock("start election win")
+	rf.log("before try change to leader,count:%d, args:%+v", grantedCount, args)
+	if rf.term == args.Term && rf.role == Candidate {
+		rf.changeRole(Leader)
+		rf.persist()
+	}
+	if rf.role == Leader {
+		rf.resetHeartBeatTimers()
+	}
+	rf.unlock("start election win")
 
 }
