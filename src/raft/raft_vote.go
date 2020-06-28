@@ -62,6 +62,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		}
 	}
 
+	defer rf.persist()
 	if args.Term > rf.term {
 		rf.term = args.Term
 		rf.voteFor = -1
@@ -180,6 +181,7 @@ func (rf *Raft) startElection() {
 		LastLogIndex: lastLogIndex,
 		LastLogTerm:  lastLogTerm,
 	}
+	rf.persist()
 	rf.unlock("start election")
 
 	grantedCount := 1
@@ -200,6 +202,7 @@ func (rf *Raft) startElection() {
 					rf.term = reply.Term
 					rf.changeRole(Follower)
 					rf.resetElectionTimer()
+					rf.persist()
 				}
 				rf.unlock("start election change term")
 			}
@@ -228,6 +231,7 @@ func (rf *Raft) startElection() {
 		rf.log("before try change to leader,count:%d, args:%+v", grantedCount, args)
 		if rf.term == args.Term && rf.role == Candidate {
 			rf.changeRole(Leader)
+			rf.persist()
 		}
 		if rf.role == Leader {
 			rf.resetHeartBeatTimers()
