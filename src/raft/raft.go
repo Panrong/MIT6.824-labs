@@ -35,7 +35,10 @@ const (
 	ElectionTimeout  = time.Millisecond * 300
 	HeartBeatTimeout = time.Millisecond * 150
 	RPCTimeout       = time.Millisecond * 100
-	MaxLockTime      = time.Millisecond * 10   //debug
+	MaxLockTime      = time.Millisecond * 10   // debug
+
+	// 2B
+	ApplyInterval    = time.Millisecond * 100  // apply log
 
 )
 
@@ -88,7 +91,7 @@ type Raft struct {
 	role       Role
 	term       int
 	voteFor    int  // server id, -1 for null
-	LogEntries []LogEntry
+	logEntries []LogEntry  // lastSnapshot放到index 0
 	stopCh   chan struct{}
 
 	electionTimer       *time.Timer
@@ -100,14 +103,22 @@ type Raft struct {
 	lockName  string     // debug
 	gid       int
 
-	// 2B or 2C
+	// 2B
+	// volatile state on all servers
+	commitIndex       int   // index of highest log entry known to be committed (initialized to 0)
+	lastApplied       int   // index of highest log entry applied to state machine (initialized to 0)
+
+
+	applyTimer        *time.Timer
+	notifyApplyCh     chan struct{}
 	applyCh           chan ApplyMsg
-	commitIndex       int
+
 	lastSnapshotIndex int // 快照中的 index
 	lastSnapshotTerm  int
-	lastApplied       int   // 此 server 的 log commit
-	nextIndex         []int // 下一个要发送的
-	matchIndex        []int // 确认 match 的
+
+	// volatile state on leaders, reinitialized after election
+	nextIndex         []int // for each server, index of the next log entry to send to that server (initialized to leader last log index + 1)
+	matchIndex        []int // for each server, index of highest log entry known to be replicated on server (initialized to 0)
 }
 
 // return currentTerm and whether this server
@@ -145,7 +156,14 @@ func (rf *Raft) changeRole(role Role) {
 		rf.voteFor = rf.me
 		rf.resetElectionTimer()
 	case Leader:
-		//todo
+		_, lastLogIndex := rf.lastLogTermIndex()
+		rf.nextIndex = make([]int, len(rf.peers))
+		for i := 0; i < len(rf.peers); i++ {
+			rf.nextIndex[i] = lastLogIndex + 1
+		}
+		rf.matchIndex = make([]int, len(rf.peers))
+		rf.matchIndex[rf.me] = lastLogIndex
+
 		rf.resetElectionTimer()
 	default:
 		panic("unknown role")
@@ -153,8 +171,8 @@ func (rf *Raft) changeRole(role Role) {
 }
 
 func (rf *Raft) lastLogTermIndex() (int, int) {
-	term := rf.LogEntries[len(rf.LogEntries) - 1].Term
-	index := rf.lastSnapshotTerm + len(rf.LogEntries) - 1
+	term := rf.logEntries[len(rf.logEntries) - 1].Term
+	index := rf.lastSnapshotTerm + len(rf.logEntries) - 1
 	return term, index
 }
 
@@ -213,12 +231,25 @@ func (rf *Raft) readPersist(data []byte) {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
-
 	// Your code here (2B).
+	rf.lock("start")
+	isLeader := rf.role == Leader
+	term := rf.term
+	_, lastIndex := rf.lastLogTermIndex()
+	index := lastIndex + 1
 
+
+	if isLeader {
+		rf.logEntries = append(rf.logEntries, LogEntry{
+			Term:    rf.term,
+			Command: command,
+			Idx:     index,
+		})
+		rf.matchIndex[rf.me] = index
+		rf.persist()
+	}
+	rf.resetHeartBeatTimers()
+	rf.unlock("start")
 
 	return index, term, isLeader
 }
@@ -256,6 +287,60 @@ func (rf *Raft) log(format string, a ...interface{}) {
 	log.Printf("%s:log:%s\n", s, r)
 }
 
+func (rf *Raft) startApplyLogs() {
+	defer rf.applyTimer.Reset(ApplyInterval)
+
+	rf.lock("apply logs 1")
+	var msgs []ApplyMsg
+	if rf.lastApplied < rf.lastSnapshotIndex {
+		// log过于落后，应该安装snapshot
+		msgs = make([]ApplyMsg, 0, 1)
+		msgs = append(msgs, ApplyMsg{
+			CommandValid: false,
+			Command:      "installSnapShot",
+			CommandIndex: rf.lastSnapshotIndex,
+		})
+	} else if rf.commitIndex <= rf.lastApplied {
+		// snapshot没有更新commit idx
+		msgs = make([]ApplyMsg, 0)
+	} else {
+		//
+		rf.log("rf apply")
+		msgs = make([]ApplyMsg, 0, rf.commitIndex-rf.lastApplied)
+		for i := rf.lastApplied + 1; i <= rf.commitIndex; i++ {
+			msgs = append(msgs, ApplyMsg{
+				CommandValid: true,
+				Command:      rf.logEntries[rf.getRealIdxByLogIndex(i)].Command,
+				CommandIndex: i,
+			})
+		}
+	}
+	rf.unlock("apply logs 1")
+
+	// 依次发送给？执行
+	for _, msg := range msgs {
+		rf.applyCh <- msg
+		rf.lock("append log 2")
+		rf.log("send applych id:%d", msg.CommandIndex)
+		rf.lastApplied = msg.CommandIndex
+		rf.unlock("append log 2")
+	}
+}
+
+func (rf *Raft) getLogByIndex(logIndex int) LogEntry {
+	idx := logIndex - rf.lastSnapshotIndex
+	return rf.logEntries[idx]
+}
+
+func (rf *Raft) getRealIdxByLogIndex(logIndex int) int {
+	idx := logIndex - rf.lastSnapshotIndex
+	if idx < 0 {
+		return -1
+	} else {
+		return idx
+	}
+}
+
 //
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -285,7 +370,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.term = 0
 	rf.voteFor = -1
 	rf.role = Follower
-	rf.LogEntries = make([]LogEntry, 1)
+	rf.logEntries = make([]LogEntry, 1)
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
