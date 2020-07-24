@@ -258,7 +258,7 @@ func (rf *Raft) updateCommitIndex() {
 	for i := rf.commitIndex + 1; i <= rf.lastSnapshotIndex + len(rf.logEntries); i++ {
 		count := 0
 		for _, m := range rf.matchIndex {
-			if m > i {
+			if m >= i {
 				count += 1
 				if count > len(rf.peers)/2 {
 					rf.commitIndex = i
