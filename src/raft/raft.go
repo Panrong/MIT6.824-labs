@@ -18,17 +18,17 @@ package raft
 //
 
 import (
+	"../labgob"
+	"../labrpc"
+	"bytes"
 	"fmt"
 	"log"
 	"math/rand"
 	"sync"
+	"sync/atomic"
 	"time"
 )
-import "sync/atomic"
-import "../labrpc"
 
-// import "bytes"
-// import "../labgob"
 
 const (
 	// 2A
@@ -190,6 +190,20 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+
+	// get persist data
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.term)
+	e.Encode(rf.voteFor)
+	e.Encode(rf.commitIndex)
+	e.Encode(rf.lastSnapshotIndex)
+	e.Encode(rf.lastSnapshotTerm)
+	e.Encode(rf.logEntries)
+	data := w.Bytes()
+
+	// store persist data
+	rf.persister.SaveRaftState(data)
 }
 
 
@@ -213,6 +227,32 @@ func (rf *Raft) readPersist(data []byte) {
 	//   rf.xxx = xxx
 	//   rf.yyy = yyy
 	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	var term int
+	var voteFor int
+	var logs []LogEntry
+	var commitIndex, lastSnapshotIndex, lastSnapshotTerm int
+
+	if d.Decode(&term) != nil ||
+		d.Decode(&voteFor) != nil ||
+		d.Decode(&commitIndex) != nil ||
+		d.Decode(&lastSnapshotIndex) != nil ||
+		d.Decode(&lastSnapshotTerm) != nil ||
+		d.Decode(&logs) != nil {
+		log.Fatal("rf read persist err")
+	} else {
+		rf.term = term
+		rf.voteFor = voteFor
+		rf.commitIndex = commitIndex
+		rf.lastSnapshotIndex = lastSnapshotIndex
+		rf.lastSnapshotTerm = lastSnapshotTerm
+		rf.logEntries = logs
+	}
+
+
+
 }
 
 
@@ -317,7 +357,6 @@ func (rf *Raft) startApplyLogs() {
 	}
 	rf.unlock("apply logs 1")
 
-	// 依次发送给？执行
 	for _, msg := range msgs {
 		rf.applyCh <- msg
 		rf.lock("append log 2")
