@@ -251,8 +251,6 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.logEntries = logs
 	}
 
-
-
 }
 
 
@@ -414,11 +412,30 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
+	// 2A
 	rf.electionTimer = time.NewTimer(randElectionTimeout())
 	rf.appendEntriesTimers = make([]*time.Timer, len(rf.peers))
 	for i, _ := range rf.peers {
 		rf.appendEntriesTimers[i] = time.NewTimer(HeartBeatTimeout)
 	}
+
+	// 2B
+	rf.applyTimer = time.NewTimer(ApplyInterval)
+	rf.notifyApplyCh = make(chan struct{}, 100)
+
+	//2B: apply log
+	go func() {
+		for {
+			select {
+			case <- rf.stopCh:
+				return
+			case <- rf.applyTimer.C:
+				rf.notifyApplyCh <- struct{}{}
+			case <- rf.notifyApplyCh:
+				rf.startApplyLogs()
+			}
+		}
+	}()
 
 	//2A: kick off election
 	go func() {

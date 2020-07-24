@@ -96,7 +96,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	rf.persist()
-	rf.log("get append entries:%+v", *args, *reply)
+	rf.log("get append entries:%+v, reply:%+v", *args, *reply)
 	rf.unlock("append entries")
 }
 
