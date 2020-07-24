@@ -181,6 +181,19 @@ func (rf *Raft) lastLogTermIndex() (int, int) {
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
 //
+func (rf *Raft) getPersistData() []byte {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.term)
+	e.Encode(rf.voteFor)
+	e.Encode(rf.commitIndex)
+	e.Encode(rf.lastSnapshotIndex)
+	e.Encode(rf.lastSnapshotTerm)
+	e.Encode(rf.logEntries)
+	data := w.Bytes()
+	return data
+}
+
 func (rf *Raft) persist() {
 	// Your code here (2C).
 	// Example:
@@ -191,17 +204,7 @@ func (rf *Raft) persist() {
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
 
-	// get persist data
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-	e.Encode(rf.term)
-	e.Encode(rf.voteFor)
-	e.Encode(rf.commitIndex)
-	e.Encode(rf.lastSnapshotIndex)
-	e.Encode(rf.lastSnapshotTerm)
-	e.Encode(rf.logEntries)
-	data := w.Bytes()
-
+	data := rf.getPersistData()
 	// store persist data
 	rf.persister.SaveRaftState(data)
 }
@@ -395,11 +398,20 @@ func randElectionTimeout() time.Duration {
 }
 
 func Make(peers []*labrpc.ClientEnd, me int,
-	persister *Persister, applyCh chan ApplyMsg) *Raft {
+	persister *Persister, applyCh chan ApplyMsg, gid ...int) *Raft {
 	rf := &Raft{}
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.applyCh = applyCh
+
+	rf.DebugLog = false
+	// gid for test
+	if len(gid) != 0 {
+		rf.gid = gid[0]
+	} else {
+		rf.gid = -1
+	}
 
 	// Your initialization code here (2A, 2B, 2C).
 	// 2A
@@ -419,11 +431,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 		rf.appendEntriesTimers[i] = time.NewTimer(HeartBeatTimeout)
 	}
 
-	// 2B
+	// 2B: apply log
 	rf.applyTimer = time.NewTimer(ApplyInterval)
 	rf.notifyApplyCh = make(chan struct{}, 100)
 
-	//2B: apply log
 	go func() {
 		for {
 			select {
